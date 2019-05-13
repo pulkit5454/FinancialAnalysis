@@ -1,0 +1,157 @@
+#Getting the data# -*- coding: utf-8 -*-
+"""
+Created on Fri Dec 28 13:12:54 2018
+
+@author: PUMATHUR
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Dec 27 15:31:13 2018
+
+@author: PUMATHUR
+"""
+import bs4 as bs
+import urllib.request
+import nltk
+nltk.download('vader_lexicon')
+import re
+import heapq
+import numpy as np
+import os
+from xml.dom import minidom
+
+
+directory = 'Path to incoming financial analysis documents'
+for file in os.listdir(directory):
+    filepath = os.path.join(directory, file)
+    f = open(filepath, 'r', encoding='utf-8')
+    text = f.read()
+    f.close()
+    text = re.sub(r'\[[0-9]*\]',' ', text)
+    text = re.sub(r'\s+',' ',text)
+    clean_text = text.lower()
+    clean_text = re.sub(r'\W', ' ', clean_text)
+    clean_text = re.sub(r'\d', ' ', clean_text)
+    clean_text = re.sub(r'\s+', ' ', clean_text)
+    MultiplyFactor = 1
+    
+    dataset = nltk.sent_tokenize(text)
+    
+    positionWeights = []
+    counter = 1;
+    
+    for data in dataset:
+        positionWeights.append(counter * 0.1 * MultiplyFactor)
+        counter += 1
+    
+    new_dataset = dataset.copy()
+    stop_words = nltk.corpus.stopwords.words('english')
+    for i in range(len(dataset)):
+       # dataset[i] = dataset[i].lower()
+        dataset[i] = re.sub(r'\W', ' ', dataset[i])
+        dataset[i] = re.sub(r'\s+', ' ', dataset[i])
+        
+    # Creating the histogram
+    
+    word2count = {}
+    for data in dataset:
+        words = nltk.word_tokenize(data)
+        for word in words:
+            if word not in stop_words:
+                if word not in word2count.keys():
+                    word2count[word] = 1
+                else:
+                    word2count[word] += 1
+                    
+    freq_words = heapq.nlargest(100, word2count, key=word2count.get)
+    
+    # IDF Matrix
+    
+    less_imp = ['justice', 'federal', 'income', 'expenses']
+    more_imp = ['short', 'sell', 'buy', 'million', 'millions', 'billion', 'billions', 'trillion']
+    word_idfs = {}
+    
+    for word in freq_words:
+        doc_count = 0
+        for data in dataset:
+            if  word in nltk.word_tokenize(data):
+                doc_count +=1
+        word_idfs[word] =  np.log((len(dataset)/doc_count)+1)
+        if word in less_imp:
+            # Increase the score by 0.5 for a word which is contained in the list less_imp
+            word_idfs[word] = word_idfs[word] + 5
+        elif word in more_imp:
+            # Increase the score by 1 for a word which is contained in the list more_imp
+            word_idfs[word] = word_idfs[word] + 10
+    # TF Matrix
+        
+    tf_matrix = {}
+    for word in freq_words:
+        doc_tf = []
+        for data in dataset:
+            frequency = 0
+            for w in nltk.word_tokenize(data):
+                if w == word:
+                    frequency += 1
+            tf_word = frequency/len(nltk.word_tokenize(data))
+            doc_tf.append(tf_word)
+        tf_matrix[word] = doc_tf
+       
+    # TF_IDF Calculation
+        
+    tfidf_matrix = []
+    for word in tf_matrix.keys():
+        tfidf = []
+        for value in tf_matrix[word]:
+            score = value * word_idfs[word]
+            tfidf.append(score)
+        tfidf_matrix.append(tfidf)
+    
+    X = np.asarray(tfidf_matrix)
+    
+    X = np.transpose(X)
+    
+    #tagged_words = []
+    
+    #for data in dataset:
+     #   for word in nltk.word_tokenize(data):
+     #    tagged_words = (nltk.pos_tag(data))
+     
+    sent2score = {}
+    
+    for i in range (len(X)):
+        sum = 0
+        for j in range (len(X[i])):
+            sum = sum + X[i][j]
+        sent2score[dataset[i]] = sum + positionWeights[i]
+            
+        
+    best_sentences = heapq.nlargest(30,sent2score,key=sent2score.get)
+    sentiment_input = ''.join(best_sentences)
+    #print(sentiment_input)
+    
+    writepath= directory + file + "Analysis"
+    from nltk.sentiment.vader import SentimentIntensityAnalyzer
+    analyser = SentimentIntensityAnalyzer()
+    def sentiment_analyzer_scores(sentence):
+        positive_score = analyser.polarity_scores(sentence)["pos"]
+        negative_score = analyser.polarity_scores(sentence)["neg"]
+        neutral_score = analyser.polarity_scores(sentence)["neu"]
+        score = analyser.polarity_scores(sentence)
+        print("{:-<40} {}".format(sentence, str(score)))
+        with open(writepath,'a') as myfile:
+            myfile.write('BUY ' + str(positive_score*100) + "%" + '   NEUTRAL ' + str(neutral_score*100) + "%"+ '   SELL '+ str(negative_score*100)+ "%" + '\n' + '\n')
+    sentiment_analyzer_scores(sentiment_input)
+    
+    print ('--------------------------------------------------')
+    
+    
+    
+    
+    for sentence in best_sentences:
+        
+        with open(writepath,'a') as myfile:
+            myfile.write(sentence)
+            myfile.write('.')
+            myfile.write('\n')
